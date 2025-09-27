@@ -1,26 +1,21 @@
-const mongoose = require('mongoose');
-const Schema = mongoose.Schema;
+// /models/ShopProduct.js
+const { Schema, model } = require('mongoose');
 
-// Вложенная схема для управления размерами
-const SizeInfo = new Schema({
-    techSize: { type: String, required: true }, // Размер, например "42" или "S"
-    isAvailable: { type: Boolean, default: true } // В наличии ли этот размер
-});
+// Вложенная схема для размеров внутри товара магазина
+const sizeSchema = new Schema({
+    // ======================= ИЗМЕНЕНИЕ =======================
+    sku: { type: String, required: true },  // баркод
+    name: { type: String, required: true }, // Это techSize, который видит пользователь
+    amount: { type: Number, default: 0 }
+}, { _id: false });
 
 const shopProductSchema = new Schema({
-    nmID: { // Ключ для связи с коллекцией Cards
-        type: Number,
-        required: true,
-        unique: true,
-        index: true
-    },
-    price: { // Наша собственная цена
-        type: Number,
-        required: true
-    },
-    sizes: [SizeInfo] // Массив размеров и их наличие
-}, {
-    timestamps: true
+    nmID: { type: Number, required: true, unique: true },
+    price: { type: Number, required: true },
+    active: { type: Boolean, default: true },
+    sizes: [sizeSchema]
 });
 
-module.exports = mongoose.model('shop_product', shopProductSchema);
+module.exports = model('ShopProduct', shopProductSchema, 'shop_products');
+
+// module.exports = model('ShopProduct', shopProductSchema);

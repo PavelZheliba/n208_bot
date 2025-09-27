@@ -1,57 +1,89 @@
-// handlers/adminHandler.js
-const bot = require('../bot');
+// /handlers/adminHandler.js
 const { Markup } = require('telegraf');
+const bot = require('../bot');
+const Admin = require('../models/Admin');
+const ShopCategory = require('../models/ShopCategory');
 
-const ADMIN_IDS = process.env.ADMIN_IDS.split(',').map(id => parseInt(id.trim(), 10));
+// ========================================================================
+// ===                     ОБНОВЛЯЕМ ФУНКЦИЮ ПРОВЕРКИ                   ===
+// ========================================================================
+async function isAdmin(telegramId) {
+    // 1. Получаем список ID "супер-админов" из файла .env
+    const superAdminIdsEnv = process.env.ADMIN_IDS || '';
+    const superAdminIds = superAdminIdsEnv.split(',').map(Number);
 
-// Миддлвер для проверки, является ли пользователь админом
-const adminMiddleware = (ctx, next) => {
-    if (ADMIN_IDS.includes(ctx.from.id)) {
-        return next();
+    // 2. Проверяем, есть ли ID пользователя в этом списке.
+    // Если есть - сразу возвращаем true, не обращаясь к базе. Это быстро.
+    if (superAdminIds.includes(telegramId)) {
+        return true;
     }
-    ctx.reply('У вас нет доступа к этой команде.').catch(e => console.error(e));
-};
+
+    // 3. Если пользователь не "супер-админ", проверяем его в базе данных.
+    const adminFromDb = await Admin.findOne({ telegramId });
+    return !!adminFromDb; // вернет true, если найден в базе, иначе false
+}
+// ========================================================================
+
 
 function registerAdminHandlers() {
-
-    const adminMenu = Markup.inlineKeyboard([
-        [Markup.button.callback('⚙️ Управление товаром (цена/наличие)', 'admin:manage_product')],
-        [Markup.button.callback('👁️ Посмотреть категорию', 'admin:view_category')], // <-- НОВАЯ КНОПКА
-        [Markup.button.callback('➕ Добавить товар в категорию', 'admin:add_product')],
-        [Markup.button.callback('📁 Создать категорию', 'admin:create_cat')],
-        [Markup.button.callback('❌ Удалить товар', 'admin:delete_product')],
-    ], { columns: 2 }); // Можно вернуть 2 колонки, если помещается
-
-
-
-    bot.command('admin', adminMiddleware, async (ctx) => {
-        await ctx.reply('Добро пожаловать в панель администратора!', adminMenu);
+    bot.command('admin', async (ctx) => {
+        if (!await isAdmin(ctx.from.id)) return;
+        await ctx.scene.enter('ADMIN_SCENE');
     });
 
-    bot.action('admin:view_category', adminMiddleware, async (ctx) => {
+    bot.action('manage_categories', async (ctx) => {
+        if (!await isAdmin(ctx.from.id)) return;
         await ctx.answerCbQuery();
-        ctx.scene.enter('VIEW_CATEGORY_WIZARD');
+
+        const categories = await ShopCategory.find({});
+        const buttons = categories.map(cat => [Markup.button.callback(cat.name, `manage_category:${cat.code}`)]);
+        buttons.push(
+            [Markup.button.callback('➕ Добавить категорию', 'add_category')],
+            [Markup.button.callback('➖ Удалить категорию', 'remove_category')],
+            [Markup.button.callback('⬅️ Назад в админку', 'back_to_admin_menu')]
+        );
+
+        await ctx.editMessageText('Управление категориями:', Markup.inlineKeyboard(buttons));
     });
 
-    bot.action('admin:add_product', adminMiddleware, async (ctx) => {
+    bot.action(/^manage_category:(.+)$/, async (ctx) => {
+        if (!await isAdmin(ctx.from.id)) return;
         await ctx.answerCbQuery();
-        ctx.scene.enter('ADD_PRODUCT_WIZARD');
+
+        const categoryCode = ctx.match[1];
+        await ctx.scene.enter('MANAGE_PRODUCTS_WIZARD', { categoryCode: categoryCode });
     });
 
-    bot.action('admin:manage_product', adminMiddleware, async (ctx) => {
+    bot.action('add_category', async (ctx) => {
+        if (!await isAdmin(ctx.from.id)) return;
         await ctx.answerCbQuery();
-        ctx.scene.enter('MANAGE_PRODUCT_WIZARD');
+        await ctx.scene.enter('ADD_CATEGORY_WIZARD');
     });
 
-    bot.action('admin:create_cat', adminMiddleware, async (ctx) => {
-        await ctx.answerCbQuery(); // Убираем "часики" на кнопке
-        ctx.scene.enter('CREATE_CATEGORY_WIZARD'); // Входим в нашу новую сцену
-    });
-
-    bot.action('admin:delete_product', adminMiddleware, async (ctx) => {
+    bot.action('remove_category', async (ctx) => {
+        if (!await isAdmin(ctx.from.id)) return;
         await ctx.answerCbQuery();
-        ctx.scene.enter('DELETE_PRODUCT_WIZARD'); // Входим в сцену удаления
+        await ctx.scene.enter('REMOVE_CATEGORY_WIZARD');
     });
-    console.log('Обработчики для администратора зарегистрированы.');
+
+    bot.action('back_to_admin_menu', async (ctx) => {
+        if (!await isAdmin(ctx.from.id)) return;
+        await ctx.answerCbQuery();
+        await ctx.scene.reenter();
+    });
+
+    bot.on('text', async (ctx, next) => {
+        // Проверяем, является ли пользователь админом, прежде чем что-то делать
+        // const isUserAdmin = await isAdmin(ctx.from.id);
+
+        // Этот блок теперь не нужен, так как проверка есть в каждой команде
+        // if (isUserAdmin && (!ctx.scene || !ctx.scene.current)) {
+        //     return ctx.reply('Пожалуйста, используйте кнопки или команду /admin.');
+        // }
+
+        // Передаем управление дальше другим обработчикам
+        return next();
+    });
 }
+
 module.exports = { registerAdminHandlers };
